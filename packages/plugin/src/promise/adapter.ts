@@ -344,11 +344,14 @@ export function fromPromise(plugin: Plugin) {
             terminal: {
               read: adaptApiMethod(ExperimentalEndpoints["persistentPty.read"], host.experimental.terminal.read),
             },
+            generate: {
+              text: adaptApiMethod(GenerateEndpoints["generate.text"], host.experimental.generate.text),
+              image: adaptApiMethod(GenerateEndpoints["generate.image"], host.experimental.generate.image),
+              decisions: adaptApiMethod(GenerateEndpoints["generate.decisions"], host.experimental.generate.decisions),
+            },
           },
           generate: {
             text: adaptApiMethod(GenerateEndpoints["generate.text"], host.generate.text),
-            image: adaptApiMethod(GenerateEndpoints["generate.image"], host.generate.image),
-            decisions: adaptApiMethod(GenerateEndpoints["generate.decisions"], host.generate.decisions),
           },
           model: {
             list: adaptApiMethod(ModelEndpoints["model.list"], host.model.list),
