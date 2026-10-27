@@ -136,12 +136,6 @@ export interface Resolved {
   readonly chunkTimeout?: number | false
 }
 
-/** An image or decision model ready to run, with the catalog entry it came from. */
-export interface ResolvedMedia<Runtime> {
-  readonly model: Runtime
-  readonly info: Info
-}
-
 export type MediaError =
   | VariantUnavailableError
   | UnsupportedPackageError
@@ -154,9 +148,9 @@ export interface Interface {
   readonly resolve: (requested?: Ref) => Effect.Effect<Resolved | undefined, Error>
   readonly resolveModel: (model: Info, variant?: VariantID) => Effect.Effect<Resolved, Error>
   /** An enabled image model by ref, or undefined when no image model has that ref. */
-  readonly resolveImage: (ref: Ref) => Effect.Effect<ResolvedMedia<ImageModel> | undefined, MediaError>
+  readonly resolveImage: (ref: Ref) => Effect.Effect<ImageModel | undefined, MediaError>
   /** An enabled decision model by ref, or undefined when no decision model has that ref. */
-  readonly resolveDecision: (ref: Ref) => Effect.Effect<ResolvedMedia<DecisionModel> | undefined, MediaError>
+  readonly resolveDecision: (ref: Ref) => Effect.Effect<DecisionModel | undefined, MediaError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ModelResolver") {}
@@ -260,15 +254,7 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
         },
       })
     },
-    catch: (cause) =>
-      cause instanceof ProviderConfigurationError
-        ? new ModelConfigurationError({
-            providerID: resolved.providerID,
-            modelID: resolved.id,
-            package: resolved.package ?? "unknown",
-            detail: cause.message,
-          })
-        : initialization(resolved, "construct", cause),
+    catch: (cause) => constructionError(resolved, cause),
   })
 })
 
@@ -300,7 +286,7 @@ const loadCatalogPackage = Effect.fn("ModelResolver.loadCatalogPackage")(functio
  * Builds an image or decision model from its catalog package. The entrypoint (`providers/<P>/images`) exports the
  * same `model(modelID, settings)` as chat; a package that returns another kind of model cannot serve this type.
  */
-export const fromCatalogMedia = Effect.fn("ModelResolver.fromCatalogMedia")(function* <Runtime>(
+const fromCatalogMedia = Effect.fn("ModelResolver.fromCatalogMedia")(function* <Runtime>(
   model: RuntimeInfo,
   is: (value: unknown) => value is Runtime,
   credential?: Credential.Value,
@@ -309,19 +295,21 @@ export const fromCatalogMedia = Effect.fn("ModelResolver.fromCatalogMedia")(func
   const { resolved, module, settings } = yield* loadCatalogPackage(model, credential, dependencies)
   const runtime: unknown = yield* Effect.try({
     try: () => module.model(resolved.modelID ?? resolved.id, settings),
-    catch: (cause) =>
-      cause instanceof ProviderConfigurationError
-        ? new ModelConfigurationError({
-            providerID: resolved.providerID,
-            modelID: resolved.id,
-            package: resolved.package ?? "unknown",
-            detail: cause.message,
-          })
-        : initialization(resolved, "construct", cause),
+    catch: (cause) => constructionError(resolved, cause),
   })
   if (!is(runtime)) return yield* unsupported(resolved)
   return runtime
 })
+
+const constructionError = (model: RuntimeInfo, cause: unknown) =>
+  cause instanceof ProviderConfigurationError
+    ? new ModelConfigurationError({
+        providerID: model.providerID,
+        modelID: model.id,
+        package: model.package ?? "unknown",
+        detail: cause.message,
+      })
+    : initialization(model, "construct", cause)
 
 const isImageModel = Schema.is(ImageModelSchema)
 const isDecisionModel = Schema.is(DecisionModelSchema)
@@ -362,8 +350,7 @@ function prepareProviderURL(
   const prepared = baseURL.replace(
     /\$\{([^}]+)\}/g,
     (placeholder, name: string) =>
-      (name === "AWS_REGION" && typeof settings.region === "string" ? settings.region : process.env[name]) ??
-      placeholder,
+      (name === "AWS_REGION" && typeof settings.region === "string" ? settings.region : process.env[name]) ?? placeholder,
   )
   const failure = unresolvedProviderVariables(model, prepared)
   return failure ? Effect.fail(failure) : Effect.succeed(prepared)
@@ -498,7 +485,7 @@ export const layer = Layer.effect(
       )
       if (!info) return undefined
       const { credential, runtimeInfo } = yield* prepare(info, ref.variant)
-      return { model: yield* fromCatalogMedia(runtimeInfo, is, credential, dependencies), info }
+      return yield* fromCatalogMedia(runtimeInfo, is, credential, dependencies)
     })
     return Service.of({
       resolve: Effect.fn("ModelResolver.resolve")(function* (requested) {

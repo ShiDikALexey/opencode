@@ -90,26 +90,24 @@ export const layer = Layer.effect(
     const decisionClient = yield* DecisionClient.Service
 
     const runText = Effect.fn("Generate.text")(function* (input: TextInput) {
-      const resolved = yield* resolver
-        .resolve(input.model)
-        .pipe(
-          Effect.catchTag(
-            [
-              "SessionRunnerModel.VariantUnavailableError",
-              "SessionRunnerModel.UnsupportedPackageError",
-              "SessionRunnerModel.ModelConfigurationError",
-              "SessionRunnerModel.ModelInitializationError",
-              "SessionRunnerModel.UnresolvedProviderVariablesError",
-              "SessionRunnerModel.UnsupportedCompactionError",
-            ],
-            (error) =>
-              Effect.fail(
-                input.model
-                  ? resolutionError(input.model, "chat", error)
-                  : new UnavailableError({ message: error.message, service: error.providerID }),
-              ),
-          ),
-        )
+      const resolved = yield* resolver.resolve(input.model).pipe(
+        Effect.catchTag(
+          [
+            "SessionRunnerModel.VariantUnavailableError",
+            "SessionRunnerModel.UnsupportedPackageError",
+            "SessionRunnerModel.ModelConfigurationError",
+            "SessionRunnerModel.ModelInitializationError",
+            "SessionRunnerModel.UnresolvedProviderVariablesError",
+            "SessionRunnerModel.UnsupportedCompactionError",
+          ],
+          (error) =>
+            Effect.fail(
+              input.model
+                ? resolutionError(input.model, "chat", error)
+                : new UnavailableError({ message: error.message, service: error.providerID }),
+            ),
+        ),
+      )
       if (!resolved && input.model) return yield* missing(input.model, "chat")
       if (!resolved)
         return yield* new UnavailableError({ message: "No model specified and no supported model is available" })
@@ -127,30 +125,6 @@ export const layer = Layer.effect(
           Effect.mapError((error) => providerError(resolved.ref, error)),
         )
       return response.text
-    })
-
-    const text: Interface["text"] = (input) =>
-      runText(input).pipe(
-        Effect.catchTag(
-          "Integration.Authorization",
-          () =>
-            new UnavailableError({
-              message: "Generation credentials are unavailable",
-            }),
-        ),
-      )
-
-    // Looks up a model of one type, or explains why the ref can't serve it: unknown (404) or another type (422).
-    const resolveMedia = Effect.fnUntraced(function* <Runtime>(
-      ref: Model.Ref,
-      type: "image" | "decision",
-      resolve: (
-        ref: Model.Ref,
-      ) => Effect.Effect<ModelResolver.ResolvedMedia<Runtime> | undefined, ModelResolver.MediaError>,
-    ) {
-      const resolved = yield* resolve(ref).pipe(Effect.mapError((error) => resolutionError(ref, type, error)))
-      if (resolved) return resolved
-      return yield* missing(ref, type)
     })
 
     // A ref no model of this type has: another type's model (422) or no model at all (404).
@@ -173,19 +147,25 @@ export const layer = Layer.effect(
     })
 
     const image = Effect.fn("Generate.image")(function* (input: ImageRequest) {
-      const resolved = yield* resolveMedia(input.model, "image", resolver.resolveImage)
-      const response = yield* Image.generate({
-        model: resolved.model,
-        prompt: input.prompt,
-        images: input.images?.map((file) => Media.base64(file.data, file.mime)),
-        n: input.n,
-        aspect: input.aspect,
-        resolution: input.resolution,
-      }).pipe(
-        Effect.provideService(ImageClient.Service, images),
-        ModelRetry.retry,
-        Effect.mapError((error) => providerError(input.model, error)),
-      )
+      const model = yield* resolver
+        .resolveImage(input.model)
+        .pipe(Effect.mapError((error) => resolutionError(input.model, "image", error)))
+      if (!model) return yield* missing(input.model, "image")
+      const response = yield* images
+        .generate(
+          Image.request({
+            model,
+            prompt: input.prompt,
+            images: input.images?.map((file) => Media.base64(file.data, file.mime)),
+            n: input.n,
+            aspect: input.aspect,
+            resolution: input.resolution,
+          }),
+        )
+        .pipe(
+          ModelRetry.retry,
+          Effect.mapError((error) => providerError(input.model, error)),
+        )
       // URL results are downloaded so every image comes back inline, like the request's own files.
       // Materializing also detects the type of a downloaded image from its bytes when the URL didn't say.
       const outputs = yield* Effect.forEach(response.images, (asset) =>
@@ -208,20 +188,26 @@ export const layer = Layer.effect(
     })
 
     const decisions = Effect.fn("Generate.decisions")(function* (input: DecisionRequest) {
-      const resolved = yield* resolveMedia(input.model, "decision", resolver.resolveDecision)
-      const response = yield* Decision.generate({
-        model: resolved.model,
-        input: input.input.map((part) =>
-          part.type === "file"
-            ? { type: "media" as const, media: Media.base64(part.data, part.mime), filename: part.name }
-            : part,
-        ),
-        questions: input.questions,
-      }).pipe(
-        Effect.provideService(DecisionClient.Service, decisionClient),
-        ModelRetry.retry,
-        Effect.mapError((error) => providerError(input.model, error)),
-      )
+      const model = yield* resolver
+        .resolveDecision(input.model)
+        .pipe(Effect.mapError((error) => resolutionError(input.model, "decision", error)))
+      if (!model) return yield* missing(input.model, "decision")
+      const response = yield* decisionClient
+        .generate(
+          Decision.request({
+            model,
+            input: input.input.map((part) =>
+              part.type === "file"
+                ? { type: "media" as const, media: Media.base64(part.data, part.mime), filename: part.name }
+                : part,
+            ),
+            questions: input.questions,
+          }),
+        )
+        .pipe(
+          ModelRetry.retry,
+          Effect.mapError((error) => providerError(input.model, error)),
+        )
       const usage = response.usage
       return {
         answers: response.answers,
@@ -242,7 +228,7 @@ export const layer = Layer.effect(
       )
 
     return Service.of({
-      text,
+      text: (input) => credentials(runText(input)),
       image: (input) => credentials(image(input)),
       decisions: (input) => credentials(decisions(input)),
     })
