@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { HttpClientRequest } from "effect/http"
-import { Decision, DecisionClient, Media } from "../src/effect.js"
+import { Decision, DecisionClient, DecisionUsage, Media } from "../src/effect.js"
 import {
   Baseten,
   CloudflareWorkersAI,
@@ -85,7 +85,7 @@ describe("Decision", () => {
         input: [
           { type: "text", text: "Ticket:" },
           { type: "json", value: { ticket: "Please refund the duplicate charge." } },
-          { type: "file", file: png },
+          { type: "media", media: png },
         ],
         questions,
         providerOptions: { trace: { enabled: true } },
@@ -94,7 +94,9 @@ describe("Decision", () => {
 
       expect(response.answers).toEqual(expectedAnswers)
       expect(response.usage?.totalTokens).toBe(36)
-      expect(response.providerMetadata).toEqual({ typesafe: { model: "jev-1.14.0" } })
+      expect(response.providerMetadata).toEqual({
+        typesafe: { model: "jev-1.14.0", usage: { input_tokens: 30, output_tokens: 6 } },
+      })
     }).pipe(
       Effect.provide(
         client((input) =>
@@ -159,7 +161,12 @@ describe("Decision", () => {
             { value: true, probability: 0.99 },
             { value: false, probability: 0.01 },
           ])
-          expect(response.usage?.providerMetadata).toEqual({ opencode: { input_tokens: 10, output_tokens: 2 } })
+          expect(response.usage).toEqual(
+            new DecisionUsage({ inputTokens: 10, outputTokens: 2, totalTokens: 12, cost: 0.0004 }),
+          )
+          expect(response.providerMetadata).toEqual({
+            opencode: { model: "jev-1.13.0", usage: { input_tokens: 10, output_tokens: 2, cost: 0.0004 } },
+          })
         }),
       ),
       Effect.provide(
@@ -180,7 +187,7 @@ describe("Decision", () => {
               answers: {
                 greeting: { type: "choice", choice: "true", probabilities: { false: 0.01, true: 0.99 }, confidence: 1 },
               },
-              usage: { input_tokens: 10, output_tokens: 2 },
+              usage: { input_tokens: 10, output_tokens: 2, cost: 0.0004 },
             }),
           )
         }),
@@ -207,8 +214,8 @@ describe("Decision", () => {
       ),
       input: [
         { type: "text", text: "Before:" },
-        { type: "file", file: Media.url("https://assets.test/before.png", { mediaType: "image/png" }) },
-        { type: "file", file: Media.base64("AAAA", "audio/wav") },
+        { type: "media", media: Media.url("https://assets.test/before.png", { mediaType: "image/png" }) },
+        { type: "media", media: Media.base64("AAAA", "audio/wav") },
       ],
       questions: [{ name: "red", type: "predicate", instructions: "Is the image mostly red?" }],
       providerOptions: { user: "user-1", session_id: "session-1" },
@@ -261,7 +268,7 @@ describe("Decision", () => {
       model: Baseten.configure({ apiKey: "baseten-key" }).decision("decision-models/baseten-mammoth-27b-latest"),
       input: [
         { type: "text", text: "Photo:" },
-        { type: "file", file: png },
+        { type: "media", media: png },
         { type: "json", value: { source: "upload" } },
       ],
       questions: [{ name: "red", type: "predicate", instructions: "Is the photo mostly red?" }],
@@ -305,8 +312,8 @@ describe("Decision", () => {
         { type: "text", text: "Ticket:" },
         { type: "json", value: { ticket: "Please refund the duplicate charge." } },
         { type: "json", value: 42 },
-        { type: "file", file: png },
-        { type: "file", file: Media.url("https://assets.test/receipt.jpg", { mediaType: "image/jpeg" }) },
+        { type: "media", media: png },
+        { type: "media", media: Media.url("https://assets.test/receipt.jpg", { mediaType: "image/jpeg" }) },
       ],
       questions,
       providerOptions: { safetyIdentifier: "user-1", promptCacheKey: "support-v1" },
@@ -315,7 +322,9 @@ describe("Decision", () => {
         Effect.sync(() => {
           expect(response.answers).toEqual(expectedAnswers)
           expect(response.usage?.inputTokens).toBe(40)
-          expect(response.providerMetadata).toEqual({ openai: { model: "gpt-6-luna" } })
+          expect(response.providerMetadata).toEqual({
+            openai: { model: "gpt-6-luna", usage: { input_tokens: 40, output_tokens: 0, total_tokens: 40 } },
+          })
         }),
       ),
       Effect.provide(
@@ -434,7 +443,7 @@ describe("Decision", () => {
     Effect.gen(function* () {
       const error = yield* Decision.generate({
         model: OpenAI.configure({ apiKey: "openai-key" }).decision("gpt-6-luna"),
-        input: [{ type: "file", file: Media.base64("AAAA", "audio/wav") }],
+        input: [{ type: "media", media: Media.base64("AAAA", "audio/wav") }],
         questions: [{ name: "speech", type: "predicate", instructions: "Is someone speaking?" }],
       }).pipe(Effect.flip)
       expect(error.reason._tag).toBe("UnsupportedOperation")
@@ -453,8 +462,9 @@ describe("Decision", () => {
       Effect.tap((response) =>
         Effect.sync(() => {
           expect(response.answers).toEqual([{ name: "refund", type: "predicate", probability: 0.98 }])
-          expect(response.providerMetadata).toEqual({ "vercel-ai-gateway": { model: "typesafe-ai/jev" } })
-          expect(response.usage?.providerMetadata).toHaveProperty("vercel-ai-gateway")
+          expect(response.providerMetadata).toEqual({
+            "vercel-ai-gateway": { model: "typesafe-ai/jev", usage: { input_tokens: 10, output_tokens: 0 } },
+          })
         }),
       ),
       Effect.provide(
@@ -485,8 +495,8 @@ describe("Decision", () => {
       ),
       input: [
         { type: "text", text: "Compare:" },
-        { type: "file", file: png },
-        { type: "file", file: Media.base64("AAAA", "audio/wav") },
+        { type: "media", media: png },
+        { type: "media", media: Media.base64("AAAA", "audio/wav") },
       ],
       questions: [{ name: "red", type: "predicate", instructions: "Is the image mostly red?" }],
     }).pipe(

@@ -9,7 +9,6 @@ import {
   ProviderID,
   ProviderMetadata,
   ProviderOptions,
-  Usage,
   type OpenString,
 } from "./schema/index.js"
 
@@ -19,12 +18,12 @@ import {
 
 export const DecisionTextPart = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String })
 export const DecisionJsonPart = Schema.Struct({ type: Schema.Literal("json"), value: Schema.Json })
-export const DecisionFilePart = Schema.Struct({
-  type: Schema.Literal("file"),
-  file: Media.AssetSchema,
-  name: Schema.optional(Schema.String),
+export const DecisionMediaPart = Schema.Struct({
+  type: Schema.Literal("media"),
+  media: Media.AssetSchema,
+  filename: Schema.optional(Schema.String),
 })
-export const DecisionPart = Schema.Union([DecisionTextPart, DecisionJsonPart, DecisionFilePart]).pipe(
+export const DecisionPart = Schema.Union([DecisionTextPart, DecisionJsonPart, DecisionMediaPart]).pipe(
   Schema.toTaggedUnion("type"),
 )
 export type DecisionPart = Schema.Schema.Type<typeof DecisionPart>
@@ -269,9 +268,18 @@ export type DecisionRequestInput<
   readonly http?: HttpOptions.Input
 }
 
+/** What decision hosts report; their raw usage stays in the response's `providerMetadata`. */
+export class DecisionUsage extends Schema.Class<DecisionUsage>("Decision.Usage")({
+  inputTokens: Schema.optional(Schema.Number),
+  outputTokens: Schema.optional(Schema.Number),
+  totalTokens: Schema.optional(Schema.Number),
+  /** USD the host says it charged for this request. */
+  cost: Schema.optional(Schema.Number),
+}) {}
+
 export class DecisionResponse extends Schema.Class<DecisionResponse>("Decision.Response")({
   answers: Schema.Array(DecisionAnswer),
-  usage: Schema.optional(Usage),
+  usage: Schema.optional(DecisionUsage),
   providerMetadata: Schema.optional(ProviderMetadata),
 }) {}
 

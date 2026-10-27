@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { DecisionResponse, type DecisionAnswer, type DecisionPart, type DecisionRequestFor } from "../decision.js"
+import { DecisionResponse, DecisionUsage, type DecisionAnswer, type DecisionPart, type DecisionRequestFor } from "../decision.js"
 import { DecisionRoute } from "../route/decision.js"
 import { Endpoint } from "../route/endpoint.js"
 import { MediaProtocol } from "../route/media-protocol.js"
@@ -82,18 +82,18 @@ const inputPart = (
         ? { type: "input_json", data: part.value }
         : { type: "input_text", text: encodeJson(part.value) },
     )
-  if (part.file.kind !== "image")
+  if (part.media.kind !== "image")
     return Effect.fail(
       new AIError({
         reason: new UnsupportedOperationError({
           operation: "decision.media",
           provider: request.model.provider,
           route: request.model.route.id,
-          message: `${NAME} takes images only; got ${part.file.kind} media`,
+          message: `${NAME} takes images only; got ${part.media.kind} media`,
         }),
       }),
     )
-  return ProviderShared.mediaReference(part.file, undefined, `${NAME} image input`).pipe(
+  return ProviderShared.mediaReference(part.media, undefined, `${NAME} image input`).pipe(
     Effect.map((reference) => ({ type: "input_image", image_url: reference.value })),
   )
 }
@@ -122,10 +122,24 @@ export const protocol = DecisionRoute.protocol({
       )
       const byName = new Map(answers.map((answer) => [answer.name, answer]))
       const ordered = context.request.questions.flatMap((question) => byName.get(question.name) ?? [])
+      const usage = OpenResponses.mapUsage(output.value.usage, context.providerMetadataKey)
       return new DecisionResponse({
         answers: ordered.length === answers.length ? ordered : answers,
-        usage: OpenResponses.mapUsage(output.value.usage, context.providerMetadataKey),
-        providerMetadata: { [context.providerMetadataKey]: { model: output.value.model } },
+        usage:
+          usage === undefined
+            ? undefined
+            : new DecisionUsage({
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                totalTokens: usage.totalTokens,
+                cost: usage.cost,
+              }),
+        providerMetadata: {
+          [context.providerMetadataKey]: {
+            model: output.value.model,
+            ...(output.value.usage === undefined ? {} : { usage: output.value.usage }),
+          },
+        },
       })
     }),
   },

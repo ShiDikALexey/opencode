@@ -139,10 +139,10 @@ const transport = (route: Omit<Route, "with" | "model">) => {
 }
 
 const materialize = (part: DecisionPart, execute: Execute) =>
-  part.type === "file" && part.file.source.type === "url"
-    ? part.file.materialize().pipe(
+  part.type === "media" && part.media.source.type === "url"
+    ? part.media.materialize().pipe(
         Effect.provideService(RequestExecutorService, { execute }),
-        Effect.map((file) => ({ ...part, file })),
+        Effect.map((media) => ({ ...part, media })),
       )
     : Effect.succeed(part)
 

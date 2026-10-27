@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import {
   DecisionResponse,
+  DecisionUsage,
   type DecisionAnswer,
   type DecisionModelCompatibility,
   type DecisionPart,
@@ -11,7 +12,7 @@ import type { Media } from "../media.js"
 import { DecisionRoute } from "../route/decision.js"
 import { Endpoint } from "../route/endpoint.js"
 import { MediaProtocol } from "../route/media-protocol.js"
-import { AIError, UnsupportedOperationError, Usage, mergeJsonRecords } from "../schema/index.js"
+import { AIError, UnsupportedOperationError, mergeJsonRecords } from "../schema/index.js"
 import { encodeJson } from "../utils/json.js"
 import { JsonObject, ProviderShared } from "./shared.js"
 
@@ -42,6 +43,7 @@ const NativeUsage = Schema.StructWithRest(
   Schema.Struct({
     input_tokens: Schema.optional(Schema.Number),
     output_tokens: Schema.optional(Schema.Number),
+    cost: Schema.optional(Schema.Number),
   }),
   [JsonObject],
 )
@@ -114,7 +116,7 @@ const placeMedia = Effect.fnUntraced(function* (request: DecisionRequestFor, med
         message: `${NAME} takes ${accepted} here; got ${asset.mediaType}`,
       }),
     })
-  const media = parts.flatMap((part) => (part.type === "file" ? [part.file] : []))
+  const media = parts.flatMap((part) => (part.type === "media" ? [part.media] : []))
   if (media.length === 0) return { state: state(parts.map(plain)) }
   if (mediaInput === "state") return { state: yield* Effect.forEach(parts, (part) => stateItem(part, unsupported)) }
   // Chat-style content in one user message: text and JSON as text parts, media as in `state`.
@@ -125,7 +127,7 @@ const placeMedia = Effect.fnUntraced(function* (request: DecisionRequestFor, med
           {
             role: "user",
             content: yield* Effect.forEach(parts, (part) =>
-              part.type === "file"
+              part.type === "media"
                 ? stateItem(part, unsupported)
                 : Effect.succeed({ type: "text", text: part.type === "text" ? part.text : encodeJson(part.value) }),
             ),
@@ -144,7 +146,7 @@ const placeMedia = Effect.fnUntraced(function* (request: DecisionRequestFor, med
         return items.length === 0 ? [] : [[field, items]]
       }),
     )
-    return { state: state(parts.filter((part) => part.type !== "file").map(plain)), ...fields }
+    return { state: state(parts.filter((part) => part.type !== "media").map(plain)), ...fields }
   }
   const unplaced = media.find((asset) => asset.kind !== "image")
   if (unplaced !== undefined) return yield* unsupported(unplaced, "images")
@@ -153,7 +155,7 @@ const placeMedia = Effect.fnUntraced(function* (request: DecisionRequestFor, med
   const reference = (index: number) => `<image-${index + 1}>`
   const items = parts.reduce<{ readonly next: number; readonly values: ReadonlyArray<unknown> }>(
     (acc, part) =>
-      part.type === "file"
+      part.type === "media"
         ? { next: acc.next + 1, values: [...acc.values, reference(acc.next)] }
         : { next: acc.next, values: [...acc.values, plain(part)] },
     { next: 0, values: [] },
@@ -182,8 +184,8 @@ const stateItem = (
   part: DecisionPart,
   unsupported: (asset: Media.Asset, accepted: string) => AIError,
 ): Effect.Effect<unknown, AIError> => {
-  if (part.type !== "file") return Effect.succeed(plain(part))
-  const asset = part.file
+  if (part.type !== "media") return Effect.succeed(plain(part))
+  const asset = part.media
   if (asset.kind !== "image" && asset.kind !== "audio" && asset.kind !== "video")
     return Effect.fail(unsupported(asset, "images, audio and video"))
   return ProviderShared.requireInlineMedia(NAME, asset).pipe(
@@ -211,15 +213,16 @@ export const toResponse = (
       usage:
         data.usage === undefined
           ? undefined
-          : new Usage({
+          : new DecisionUsage({
               inputTokens: data.usage.input_tokens,
               outputTokens: data.usage.output_tokens,
               totalTokens: ProviderShared.totalTokens(data.usage.input_tokens, data.usage.output_tokens, undefined),
-              providerMetadata: { [providerMetadataKey]: data.usage },
+              cost: data.usage.cost,
             }),
       providerMetadata: {
         [providerMetadataKey]: {
           model: data.model,
+          ...(data.usage === undefined ? {} : { usage: data.usage }),
           ...(data.id === undefined ? {} : { responseId: data.id }),
           ...(data.provider === undefined ? {} : { provider: data.provider }),
           ...data.provider_metadata?.[providerMetadataKey],
