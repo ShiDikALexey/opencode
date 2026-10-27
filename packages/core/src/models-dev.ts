@@ -153,10 +153,15 @@ type Route = {
 const BUILDS_OWN_URL = new Set([
   "@opencode/ai/providers/amazon-bedrock",
   "@opencode/ai/providers/azure/chat",
+  "@opencode/ai/providers/azure/images",
   "@opencode/ai/providers/azure/responses",
   "@opencode/ai/providers/cloudflare-ai-gateway",
+  "@opencode/ai/providers/cloudflare-ai-gateway/decisions",
   "@opencode/ai/providers/cloudflare-workers-ai",
+  "@opencode/ai/providers/cloudflare-workers-ai/decisions",
+  "@opencode/ai/providers/cloudflare-workers-ai/images",
   "@opencode/ai/providers/google-vertex/gemini",
+  "@opencode/ai/providers/google-vertex/images",
   "@opencode/ai/providers/google-vertex/messages",
   "aisdk:@jerome-benoit/sap-ai-provider-v2",
   "aisdk:watsonx-ai-provider",
@@ -234,11 +239,16 @@ function entries<A>(record: Record<string, unknown> | undefined, decode: (input:
 
 function route(providerID: Provider.ID, model: SourceModel, unknown: Set<string>): Route | undefined {
   // A chat model uses its first API with a package. Other types (image, decision…) only run through
-  // opencode's own packages, so they use their first API that has one, and are skipped without one.
+  // opencode's own packages: among the ones this build can load, they prefer the entrypoint for their type
+  // (`providers/<P>/images`) over a chat API listed first, then their first API with one, and are skipped without one.
+  const apis = entries(model.api, decodeApi).map(
+    ([protocol, entry]) => [protocol, entry, loadable(entry.sdk?.opencodeai, unknown)] as const,
+  )
   const [protocol, api, opencodeai] =
-    entries(model.api, decodeApi)
-      .map(([protocol, entry]) => [protocol, entry, loadable(entry.sdk?.opencodeai, unknown)] as const)
-      .find(([, entry, opencodeai]) => (model.type === "chat" ? opencodeai || entry.sdk?.aisdk : opencodeai)) ?? []
+    (model.type === "chat"
+      ? apis.find(([, entry, opencodeai]) => opencodeai || entry.sdk?.aisdk)
+      : (apis.find(([, , opencodeai]) => opencodeai?.endsWith(`/${model.type}s`)) ??
+        apis.find(([, , opencodeai]) => opencodeai))) ?? []
   if (!protocol || !api) return undefined
   const aisdk = api.sdk?.aisdk
   const packageName =
