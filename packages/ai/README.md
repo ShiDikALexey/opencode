@@ -50,6 +50,50 @@ Run `LLM.stream(...)` instead of `generate` when you want incremental `LLMEvent`
 `LLM.request(...)`. The event stream is provider-neutral — same shape across OpenAI Chat, OpenAI Responses,
 Anthropic Messages, Gemini, Bedrock Converse, and any OpenAI-compatible deployment.
 
+### Tool loop
+
+`stream` runs one model call; `loop` runs the model's tool calls and calls the model again until it stops calling
+tools. Events from every step arrive on one stream, with a `tool-result` after each tool runs. `until` is checked
+after each step that has tool calls, with every step's `LLMResponse`; returning `true` ends the loop without running
+them. `AI.tool` takes a plain `async` execute; a throw or rejection goes back to the model as an error result, and
+`signal` aborts when the loop is interrupted.
+`Tool.make` from `@opencode/ai/effect` is the Effect form, with a validated `success` schema:
+
+```ts
+import { readFile } from "node:fs/promises"
+import { Schema } from "effect"
+import { AI } from "@opencode/ai"
+
+const read_file = AI.tool({
+  description: "Read a UTF-8 file.",
+  parameters: Schema.Struct({ path: Schema.String }),
+  execute: ({ path }, { signal }) => readFile(path, { encoding: "utf8", signal }),
+})
+
+const events = ai.llm.loop({
+  model,
+  prompt: "Summarize package.json.",
+  tools: { read_file },
+  until: ({ steps }) => steps.length >= 8,
+})
+for await (const event of events) {
+  if (event.type === "text-delta") process.stdout.write(event.text)
+}
+```
+
+### Structured output
+
+`generateObject` forces a tool call and decodes its input against `schema`; pass `jsonSchema` instead for an
+unvalidated `unknown` object:
+
+```ts
+const { object } = await ai.llm.generateObject({
+  model,
+  prompt: "Pick a city.",
+  schema: Schema.Struct({ city: Schema.String }),
+})
+```
+
 ### Raw provider events
 
 Set `includeRaw: true` on a request to also receive every provider frame as `{ type: "raw", data }`, in order and
@@ -1112,6 +1156,7 @@ Everything below is exported from `@opencode/ai/effect` unless noted.
 
 - **`LLM.request({...})`** — build a provider-neutral `LLMRequest`. Accepts ergonomic inputs (`system: string`, `prompt: string`) that normalize into the canonical Schema classes.
 - **`LLM.generate` / `LLM.stream`** — run direct input or an `LLMRequest` through `LLMClient` for one-import use.
+- **`LLM.loop`** — stream model calls, running `Tool.make(...)` tools between them until the model stops calling tools.
 - **`Message.user(...)` / `Message.assistant(...)` / `Message.tool(...)`** — message constructors from the canonical schema model.
 - **`LanguageModel.make(...)` / `ToolCallPart.make(...)` / `ToolResultPart.make(...)` / `ToolDefinition.make(...)`** — model and tool-related constructors from the canonical schema model.
 - **`LLMEvent.is.*`** — typed guards (`is.textDelta`, `is.toolCall`, `is.finish`, …) for filtering streams.
