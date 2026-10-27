@@ -134,16 +134,14 @@ const placeMedia = Effect.fnUntraced(function* (request: DecisionRequestFor, med
         ],
       },
     }
-  if (mediaInput === "root" || mediaInput === "root_base64") {
+  if (mediaInput === "root") {
     const lists = { image: "images", audio: "audio", video: "videos" } as const
     const unplaced = media.find((asset) => !Object.hasOwn(lists, asset.kind))
     if (unplaced !== undefined) return yield* unsupported(unplaced, "images, audio and video")
     const inline = yield* Effect.forEach(media, (asset) => ProviderShared.requireInlineMedia(NAME, asset))
     const fields = Object.fromEntries(
       Object.entries(lists).flatMap(([kind, field]) => {
-        const items = inline
-          .filter((_, index) => media[index].kind === kind)
-          .map((item) => (mediaInput === "root" ? item.dataUrl : item.base64))
+        const items = inline.filter((_, index) => media[index].kind === kind).map((item) => item.dataUrl)
         return items.length === 0 ? [] : [[field, items]]
       }),
     )

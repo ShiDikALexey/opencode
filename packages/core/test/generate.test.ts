@@ -461,14 +461,13 @@ describe("image and decision generation", () => {
       expect(yield* sendImage("decide-state")).toMatchObject({
         state: ["Is this a photo?", { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } }],
       })
-      expect(yield* sendImage("decide-base64")).toMatchObject({ state: "Is this a photo?", images: ["aW1hZ2U="] })
       // Unset or unknown values keep TypeSafe's assets map.
       for (const id of ["decide-default", "decide-unknown"])
         expect(yield* sendImage(id)).toMatchObject({
           state: ["Is this a photo?", "<image-1>"],
           assets: { "<image-1>": { type: "image", format: "png", data_base64: "aW1hZ2U=" } },
         })
-      expect(yield* sendImage("decide-override")).toMatchObject({ images: ["aW1hZ2U="] })
+      expect(yield* sendImage("decide-override")).toMatchObject({ images: ["data:image/png;base64,aW1hZ2U="] })
     }),
   )
 
@@ -537,7 +536,6 @@ function decisionCatalog() {
             "decide-default": model("decide-default"),
             "decide-root": model("decide-root", { media_input: "root" }),
             "decide-state": model("decide-state", { media_input: "state" }),
-            "decide-base64": model("decide-base64", { media_input: "root_base64" }),
             "decide-unknown": model("decide-unknown", { media_input: "somewhere_new" }),
             "decide-override": model("decide-override", { media_input: "state" }),
           },
@@ -551,9 +549,7 @@ function decisionCatalog() {
         ...item,
         package: item.package ?? entry.info.package,
         // What a config `compatibility` override merges in.
-        ...(item.id === "decide-override"
-          ? { compatibility: { ...item.compatibility, mediaInput: "root_base64" } }
-          : {}),
+        ...(item.id === "decide-override" ? { compatibility: { ...item.compatibility, mediaInput: "root" } } : {}),
       }),
     ),
   )

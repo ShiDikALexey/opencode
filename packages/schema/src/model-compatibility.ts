@@ -14,7 +14,7 @@ export const MaxTokensField = Schema.Literals(["max_completion_tokens", "max_tok
 export type MaxTokensField = typeof MaxTokensField.Type
 
 /** Where a System One decision host reads media, from models.dev `compatibility.media_input`. */
-export const MediaInput = Schema.Literals(["assets", "state", "root", "root_base64"]).annotate({
+export const MediaInput = Schema.Literals(["assets", "state", "root"]).annotate({
   identifier: "Model.MediaInput",
 })
 export type MediaInput = typeof MediaInput.Type

@@ -157,10 +157,9 @@ export class DecisionModelCompatibility extends Schema.Class<DecisionModelCompat
     /**
      * Where a System One host reads media, from models.dev `[api.systemone] compatibility.media_input`, named after
      * where the media goes in the body: `assets` (TypeSafe's assets map, referenced from the state), `state` (items
-     * inside a state list), `root` (one top-level list per kind: `images`, `audio`, `videos`, as data URLs) or
-     * `root_base64` (the same lists as bare base64, as Ollama takes).
+     * inside a state list) or `root` (one top-level list per kind: `images`, `audio`, `videos`).
      */
-    mediaInput: Schema.optional(Schema.Literals(["assets", "state", "root", "root_base64"])),
+    mediaInput: Schema.optional(Schema.Literals(["assets", "state", "root"])),
   },
 ) {}
 

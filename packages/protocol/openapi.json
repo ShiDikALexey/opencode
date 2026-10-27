@@ -19033,7 +19033,7 @@
       },
       "Model.MediaInput": {
         "type": "string",
-        "enum": ["assets", "state", "root", "root_base64"]
+        "enum": ["assets", "state", "root"]
       },
       "Model.ReasoningField": {
         "anyOf": [

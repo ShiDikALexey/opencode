@@ -180,7 +180,7 @@ export type ModelMaxTokensField = "max_completion_tokens" | "max_tokens"
 
 export type ModelCacheFormat = "anthropic" | "alibaba"
 
-export type ModelMediaInput = "assets" | "state" | "root" | "root_base64"
+export type ModelMediaInput = "assets" | "state" | "root"
 
 export type ModelCapabilities = { tools: boolean; input: Array<string>; output: Array<string>; temperature?: boolean }
 
