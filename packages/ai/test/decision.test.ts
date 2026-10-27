@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { HttpClientRequest } from "effect/http"
-import { Decision, DecisionClient, Media } from "../src/effect.js"
+import { Decision, DecisionClient, DecisionModel, DecisionModelCompatibility, Media } from "../src/effect.js"
 import {
   Baseten,
   CloudflareWorkersAI,
@@ -512,6 +512,33 @@ describe("Decision", () => {
       ),
     ),
   )
+
+  it.effect("sends bare base64 in the top-level lists for root_base64 hosts like Ollama", () => {
+    const model = TypeSafeAI.configure({ apiKey: "ollama-key", baseURL: "https://ollama.test/v1" }).decision("clef")
+    return Decision.generate({
+      model: new DecisionModel({
+        ...model,
+        compatibility: DecisionModelCompatibility.make({ mediaInput: "root_base64" }),
+      }),
+      input: [
+        { type: "text", text: "Compare:" },
+        { type: "media", media: png },
+      ],
+      questions: [{ name: "red", type: "predicate", instructions: "Is the image mostly red?" }],
+    }).pipe(
+      Effect.provide(
+        client((input) => {
+          expect(JSON.parse(input.text)).toEqual({
+            model: "clef",
+            state: "Compare:",
+            images: ["AQID"],
+            questions: { red: { type: "noul", instructions: "Is the image mostly red?" } },
+          })
+          return Effect.succeed(json(input, { model: "clef", answers: { red: { type: "noul", noul: 0.9 } } }))
+        }),
+      ),
+    )
+  })
 
   it.effect("surfaces Cloudflare Run errors", () =>
     Decision.generate({

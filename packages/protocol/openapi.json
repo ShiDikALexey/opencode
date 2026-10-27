@@ -18874,6 +18874,9 @@
           },
           "supportsEffortUpdates": {
             "type": "boolean"
+          },
+          "mediaInput": {
+            "$ref": "#/components/schemas/Model.MediaInput"
           }
         },
         "additionalProperties": false
@@ -19027,6 +19030,10 @@
       "Model.MaxTokensField": {
         "type": "string",
         "enum": ["max_completion_tokens", "max_tokens"]
+      },
+      "Model.MediaInput": {
+        "type": "string",
+        "enum": ["assets", "state", "root", "root_base64"]
       },
       "Model.ReasoningField": {
         "anyOf": [
@@ -20043,6 +20050,9 @@
           },
           "cacheFormat": {
             "$ref": "#/components/schemas/Model.CacheFormat"
+          },
+          "mediaInput": {
+            "$ref": "#/components/schemas/Model.MediaInput"
           }
         },
         "additionalProperties": false
