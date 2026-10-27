@@ -121,7 +121,7 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(
-          ModelRetry.retry,
+          ModelRetry.retryOneShot,
           Effect.mapError((error) => providerError(resolved.ref, error)),
         )
       return response.text
@@ -161,7 +161,7 @@ export const layer = Layer.effect(
         resolution: input.resolution,
       }).pipe(
         Effect.provideService(ImageClient.Service, images),
-        ModelRetry.retry,
+        ModelRetry.retryOneShot,
         Effect.mapError((error) => providerError(input.model, error)),
       )
       // URL results are downloaded so every image comes back inline, like the request's own files.
@@ -200,7 +200,7 @@ export const layer = Layer.effect(
         questions: input.questions,
       }).pipe(
         Effect.provideService(DecisionClient.Service, decisionClient),
-        ModelRetry.retry,
+        ModelRetry.retryOneShot,
         Effect.mapError((error) => providerError(input.model, error)),
       )
       const usage = response.usage

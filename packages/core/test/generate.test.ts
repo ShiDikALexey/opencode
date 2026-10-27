@@ -2,10 +2,10 @@ import { describe, expect } from "bun:test"
 import {
   AIError,
   AuthenticationError,
+  HttpContext,
   InvalidRequestError,
   LanguageModel,
   LLMClient,
-  LLMEvent,
   ProviderInternalError,
   QuotaExceededError,
   RateLimitError,
@@ -98,29 +98,48 @@ it.effect("loads dynamic AI SDK models", () =>
   }),
 )
 
-for (const operation of ["request", "read"] as const) {
-  retryIt.effect(`regenerates the full stateless response after a ${operation} failure`, () =>
+retryIt.effect("retries a stateless call the provider never received", () =>
+  Effect.gen(function* () {
+    const generate = yield* Generate.Service
+    const llm = yield* TestLLM.Test
+    yield* llm.push(
+      TestLLM.failAfter(
+        new AIError({
+          reason: new TransportError({
+            message: "connect ECONNREFUSED",
+            transport: "http",
+            operation: "request",
+            code: "ECONNREFUSED",
+          }),
+        }),
+      ),
+      TestLLM.text("Fresh answer", "success"),
+    )
+    const result = yield* generate
+      .text({ prompt: "Answer privately", model: reference })
+      .pipe(Effect.forkChild({ startImmediately: true }))
+    yield* llm.wait(1)
+    yield* TestClock.adjust("3 seconds")
+    expect(yield* Fiber.join(result)).toBe("Fresh answer")
+    const requests = yield* llm.requests()
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toBe(requests[0])
+  }),
+)
+
+// The provider may already have run (and billed) these, so a one-shot call doesn't repeat them.
+for (const reason of [
+  new TransportError({ message: "Disconnected", transport: "http", operation: "read" }),
+  new TransportError({ message: "Timed out", transport: "http", operation: "request", code: "Timeout" }),
+  new ProviderInternalError({ message: "Internal error" }),
+]) {
+  retryIt.effect(`does not retry a stateless ${reason._tag} failure the provider may have run`, () =>
     Effect.gen(function* () {
       const generate = yield* Generate.Service
       const llm = yield* TestLLM.Test
-      yield* llm.push(
-        TestLLM.failAfter(
-          new AIError({ reason: new TransportError({ message: "Disconnected", transport: "http", operation }) }),
-          ...(operation === "read"
-            ? [LLMEvent.textStart({ id: "failed" }), LLMEvent.textDelta({ id: "failed", text: "Discard this" })]
-            : []),
-        ),
-        TestLLM.text("Fresh answer", "success"),
-      )
-      const result = yield* generate
-        .text({ prompt: "Answer privately", model: reference })
-        .pipe(Effect.forkChild({ startImmediately: true }))
-      yield* llm.wait(1)
-      yield* TestClock.adjust("3 seconds")
-      expect(yield* Fiber.join(result)).toBe("Fresh answer")
-      const requests = yield* llm.requests()
-      expect(requests).toHaveLength(2)
-      expect(requests[1]).toBe(requests[0])
+      yield* llm.always(TestLLM.failAfter(new AIError({ reason })))
+      yield* generate.text({ prompt: "Answer privately", model: reference }).pipe(Effect.flip)
+      expect(yield* llm.requests()).toHaveLength(1)
     }),
   )
 }
@@ -165,25 +184,24 @@ retryIt.effect("honors provider backoff and cancels without another generation",
   }),
 )
 
-for (const [reason, attempts] of [
-  [new ProviderInternalError({ message: "Unavailable" }), 11],
-  [new TransportError({ message: "Timed out", transport: "http", operation: "request", code: "Timeout" }), 4],
-] as const) {
-  retryIt.effect(`bounds stateless ${reason._tag} retries`, () =>
-    Effect.gen(function* () {
-      const generate = yield* Generate.Service
-      const llm = yield* TestLLM.Test
-      yield* llm.always(TestLLM.failAfter(new AIError({ reason })))
-      const result = yield* generate
-        .text({ prompt: "Answer privately", model: reference })
-        .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }))
-      yield* llm.wait(1)
-      yield* TestClock.adjust("2 minutes")
-      expect(yield* Fiber.join(result)).toMatchObject({ _tag: "Generate.ProviderRequestError", reason: "provider" })
-      expect(yield* llm.requests()).toHaveLength(attempts)
-    }),
-  )
-}
+retryIt.effect("retries an overloaded provider at most three times", () =>
+  Effect.gen(function* () {
+    const generate = yield* Generate.Service
+    const llm = yield* TestLLM.Test
+    const overloaded = new ProviderInternalError({
+      message: "Overloaded",
+      http: new HttpContext({ url: "https://provider.example/v1", status: 529, headers: {} }),
+    })
+    yield* llm.always(TestLLM.failAfter(new AIError({ reason: overloaded })))
+    const result = yield* generate
+      .text({ prompt: "Answer privately", model: reference })
+      .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }))
+    yield* llm.wait(1)
+    yield* TestClock.adjust("2 minutes")
+    expect(yield* Fiber.join(result)).toMatchObject({ _tag: "Generate.ProviderRequestError", reason: "overloaded" })
+    expect(yield* llm.requests()).toHaveLength(4)
+  }),
+)
 
 resolverIt.effect("resolves dynamic models with their catalog metadata", () =>
   Effect.gen(function* () {
