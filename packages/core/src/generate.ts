@@ -151,21 +151,19 @@ export const layer = Layer.effect(
         .resolveImage(input.model)
         .pipe(Effect.mapError((error) => resolutionError(input.model, "image", error)))
       if (!model) return yield* missing(input.model, "image")
-      const response = yield* images
-        .generate(
-          Image.request({
-            model,
-            prompt: input.prompt,
-            images: input.images?.map((file) => Media.base64(file.data, file.mime)),
-            n: input.n,
-            aspect: input.aspect,
-            resolution: input.resolution,
-          }),
-        )
-        .pipe(
-          ModelRetry.retry,
-          Effect.mapError((error) => providerError(input.model, error)),
-        )
+      // `Image.generate` turns an invalid request into a typed error; building it with `Image.request` would throw.
+      const response = yield* Image.generate({
+        model,
+        prompt: input.prompt,
+        images: input.images?.map((file) => Media.base64(file.data, file.mime)),
+        n: input.n,
+        aspect: input.aspect,
+        resolution: input.resolution,
+      }).pipe(
+        Effect.provideService(ImageClient.Service, images),
+        ModelRetry.retry,
+        Effect.mapError((error) => providerError(input.model, error)),
+      )
       // URL results are downloaded so every image comes back inline, like the request's own files.
       // Materializing also detects the type of a downloaded image from its bytes when the URL didn't say.
       const outputs = yield* Effect.forEach(response.images, (asset) =>
@@ -192,22 +190,19 @@ export const layer = Layer.effect(
         .resolveDecision(input.model)
         .pipe(Effect.mapError((error) => resolutionError(input.model, "decision", error)))
       if (!model) return yield* missing(input.model, "decision")
-      const response = yield* decisionClient
-        .generate(
-          Decision.request({
-            model,
-            input: input.input.map((part) =>
-              part.type === "file"
-                ? { type: "media" as const, media: Media.base64(part.data, part.mime), filename: part.name }
-                : part,
-            ),
-            questions: input.questions,
-          }),
-        )
-        .pipe(
-          ModelRetry.retry,
-          Effect.mapError((error) => providerError(input.model, error)),
-        )
+      const response = yield* Decision.generate({
+        model,
+        input: input.input.map((part) =>
+          part.type === "file"
+            ? { type: "media" as const, media: Media.base64(part.data, part.mime), filename: part.name }
+            : part,
+        ),
+        questions: input.questions,
+      }).pipe(
+        Effect.provideService(DecisionClient.Service, decisionClient),
+        ModelRetry.retry,
+        Effect.mapError((error) => providerError(input.model, error)),
+      )
       const usage = response.usage
       return {
         answers: response.answers,

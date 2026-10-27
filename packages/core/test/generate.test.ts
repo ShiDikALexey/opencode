@@ -442,6 +442,17 @@ describe("image and decision generation", () => {
     }),
   )
 
+  mediaIt.effect("returns a typed error for an invalid request instead of crashing", () =>
+    Effect.gen(function* () {
+      const generate = yield* Generate.Service
+      const question = { type: "predicate" as const, name: "a", instructions: "?" }
+      const error = yield* generate
+        .decisions({ model: ref("openrouter", "typesafe/jev-1.13"), input: [], questions: [question, question] })
+        .pipe(Effect.flip)
+      expect(error._tag).toBe("Generate.InvalidRequestError")
+    }),
+  )
+
   mediaIt.effect("rejects models of another type and unknown models", () =>
     Effect.gen(function* () {
       const generate = yield* Generate.Service
